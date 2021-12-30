@@ -21,14 +21,21 @@
 #include <Adafruit_BMP085.h>
 Adafruit_BMP085 bmp;
 
+//1wire stuff
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-// Enter a MAC address and IP address for your controller below.
-// The IP address will be dependent on your local network:
-byte mac[] = {
-  0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01
-};
+//ethernet shield stuff
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01 };
 IPAddress ip(192, 168, 1, 80);
 EthernetServer server(80);
+
+//1wire stuff
+#define ONE_WIRE_BUS 3
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
+DeviceAddress cabinet_thermo1 = { 0x28, 0x47, 0x17, 0x15, 0x06, 0x00, 0x00, 0xAB };
+
 
 //control variables
 String readString;
@@ -39,39 +46,31 @@ int flexpwr = 4;
 //setup
 //////////////////////////////////////////////////////////////////////////
 void setup() {
+  //serial
+  Serial.begin(9600);
+
   ////////////////////////////////////////
   //BMP085 related
   ////////////////////////////////////////
   if (!bmp.begin()) {
-    Serial.println("Could not find a valid BMP085 sensor, check wiring!");
+    Serial.println("BMP085 notfound");
     while (1) {}
   }
 
   ////////////////////////////////////////
   //ethernet shield-related
   ////////////////////////////////////////
-  // You can use Ethernet.init(pin) to configure the CS pin
-  Ethernet.init(10);  // Most Arduino shields
-
-  // Open serial communications and wait for port to open:
-  Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
-  Serial.println("Ethernet WebServer Example");
-
-  // start the Ethernet connection and the server:
+  Ethernet.init(10); 
+  Serial.print("WebServer at ");
   Ethernet.begin(mac, ip);
-
-  // Check for Ethernet hardware present
   if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-    Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+    Serial.println("No eth if found");
     while (true) {
       delay(1); // do nothing, no point running without Ethernet hardw        are
     }
   }
   if (Ethernet.linkStatus() == LinkOFF) {
-    Serial.println("Ethernet cable is not connected.");
+    Serial.println("no phy link");
   }
 
   ////////////////////////////////////////
@@ -83,8 +82,12 @@ void setup() {
 
   // start the server
   server.begin();
-  Serial.print("server is at ");
   Serial.println(Ethernet.localIP());
+
+  //1wire
+  sensors.begin();
+  sensors.setResolution(cabinet_thermo1, 10);
+  
 }
 
 
@@ -92,11 +95,16 @@ void setup() {
 //loop
 //////////////////////////////////////////////////////////////////////////
 void loop() {
+
+  sensors.requestTemperatures();
+  
+
+
+  
   // listen for incoming clients
   EthernetClient client = server.available();
   if (client) {
-    Serial.println("new client");
-    // an http request ends with a blank line
+    Serial.println("client connect");
     boolean currentLineIsBlank = true;
     while (client.connected()) {
       if (client.available()) {
@@ -113,7 +121,7 @@ void loop() {
         // so you can send a reply
         if (c == '\n') {
 
-          Serial.println(readString);
+          Serial.print(readString);
 
           // send a standard http response header
           client.println("HTTP/1.1 200 OK");
@@ -156,16 +164,23 @@ void loop() {
 
 
           //BMP085 info
-          client.print("<tr><td>temperature ");
+          client.print("<tr><td>board temp ");
           float tempF = bmp.readTemperature();
           tempF = ((tempF * 1.8) + 32);
           client.print(tempF); 
           client.print(" F");
           client.println("</td></tr>");
+          
           client.print("<tr><td>pressure ");
           client.print((bmp.readPressure() / 100));
           client.print(" Pa");
           client.println("</td></tr>");
+
+          client.print("<tr><td>lead temp ");
+          client.println(printTemperature(cabinet_thermo1));
+          client.print(" F");
+          client.println("</td></tr>");
+
 
 
           client.println("</table>");
@@ -193,7 +208,7 @@ void loop() {
     delay(1);
     // close the connection:
     client.stop();
-    Serial.println("client disconnected");
+    Serial.println("client disco");
 
     //AC power strip
     if (readString.indexOf("on5") > 0) {
@@ -217,4 +232,21 @@ void loop() {
 
   }
 
+}
+
+
+
+int printTemperature(DeviceAddress deviceAddress)
+{
+  float tempC = sensors.getTempC(deviceAddress);
+  if (tempC == -127.00) {
+    return (999);
+    //Serial.print("Error getting temperature");
+  } else {
+    //Serial.print("C: ");
+    //Serial.print(tempC);
+    //Serial.print(" F: ");
+    //Serial.print(DallasTemperature::toFahrenheit(tempC));
+    return(DallasTemperature::toFahrenheit(tempC));
+  }
 }
